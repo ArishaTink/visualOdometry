@@ -117,6 +117,8 @@ def lucas_kanade_track(prev_img, next_img, points, win_size=15,
 
             if (patch_x.min() < 0 or patch_x.max() >= I_L.shape[1] - 1 or
                 patch_y.min() < 0 or patch_y.max() >= I_L.shape[0] - 1):
+                if L == 0:
+                    status[i] = False
                 continue
 
             coords = np.vstack([patch_y.ravel(), patch_x.ravel()])
@@ -187,14 +189,14 @@ def track_with_fb_check(prev_img, next_img, points, fb_threshold=1.0, **kwargs):
 def normalize_points(pts: np.ndarray):
     centroid = pts.mean(axis=0)
     shifted = pts - centroid
-    mean_dist = np.sqrt((shifted ** 2).sum(axis=1)).mena()
+    mean_dist = np.sqrt((shifted ** 2).sum(axis=1)).mean()
     scale = np.sqrt(2) / (mean_dist + 1e-12)
     T = np.array([
         [scale, 0, -scale * centroid[0]],
         [0, scale, -scale * centroid[1]],
         [0, 0, 1],
     ])
-    pth_h = np.hstack([pts, np.ones((len(pts), 1))])
+    pts_h = np.hstack([pts, np.ones((len(pts), 1))])
     pts_norm = (T @ pts_h.T).T
     return pts_norm[:, :2], T
 
@@ -218,24 +220,139 @@ def eight_point_algorithm(pts1: np.ndarray, pts2: np.ndarray) -> np.ndarray:
 
     U, s, Vt2 = np.linalg.svd(F_hat)
     s[-1] = 0.0
-    F = U @ np.diag(s) @ Vt2
+    F = U @ np.diag(s) @ Vt2 #Проверить, что будет если оба сингулярных значения приравнять к 1, а наименьшее к 0
 
     F = T2.T @ F @ T1
     return F
 
 
 def sampson_distance(E: np.ndarray, pts1: np.ndarray, pts2: np.ndarray) -> np.ndarray:
-    raise NotImplementedError("Реализовать расстояние Сэмпсона")
+
+    ones = np.ones((len(pts1), 1)) #перевод в однородные координаты
+    x1 = np.hstack([pts1, ones])
+    x2 = np.hstack([pts2, ones])
+
+    Ex1 = (E @ x1.T).T #эпиполярные линии для точек из первого изображения
+    Etx2 = (E.T @ x2.T).T #эпиполярные линии для точек из второго изображения
+
+    numerator = np.sum(x2 * Ex1, axis=1) ** 2
+    denominator = Ex1[:, 0] ** 2 + Ex1[:, 1] ** 2 + Etx2[:, 0] ** 2 + Etx2[:, 1] ** 2
+    denominator = np.maximum(denominator, 1e-12)
+
+    return numerator / denominator
 
 
-def estimate_essential_ransac(pts1, pts2, K, threshold=1e-3,
-                               max_iters=1000, min_inliers=8):
-    raise NotImplementedError("Реализовать RANSAC для Essential matrix")
+
+def estimate_essential_ransac(pts1, pts2, K, px_tol=1.0, threshold=None,
+                               max_iters=1000, min_inliers=12, confidence=0.999):
+    K_inv = np.linalg.inv(K)
+    pts1_h = np.hstack([pts1, np.ones((len(pts1), 1))])
+    pts2_h = np.hstack([pts2, np.ones((len(pts2), 1))])
+    pts1_n = (K_inv @ pts1_h.T).T[:, :2]
+    pts2_n = (K_inv @ pts2_h.T).T[:, :2]
+
+    n = len(pts1_n)
+    if n < 8:
+        return None, None
     
+    if threshold is None:
+        f = (K[0, 0] + K[1, 1]) / 2.0
+        threshold = (px_tol / f) ** 2
 
+    best_inliers = None
+    best_E = None
+    rng = np.random.default_rng()
+
+    iters = max_iters
+    i = 0
+
+    while i < iters:
+        i += 1
+        idx = rng.choice(n, size=8, replace=False) #без повторов
+
+        try:
+            E_candidate = eight_point_algorithm(pts1_n[idx], pts2_n[idx])
+        except np.linalg.LinAlgError:
+            continue
+
+        d = sampson_distance(E_candidate, pts1_n, pts2_n)
+        inliers = d < threshold
+
+        if best_inliers is None or inliers.sum() > best_inliers.sum():
+            best_inliers = inliers
+            best_E = E_candidate
+
+            w = best_inliers.sum() / n
+            if w > 0:
+                denom = 1.0 - w ** 8
+                if 1e-12 < denom < 1.0 - 1e-12:
+                    need = np.log(1.0 - confidence) / np.log(denom)
+                    iters = min(max_iters, max(20, int(np.ceil(need))))
+
+    if best_inliers is None or best_inliers.sum() < min_inliers:
+        return None, None
+
+    E_final = eight_point_algorithm(pts1_n[best_inliers], pts2_n[best_inliers])
+
+    return E_final, best_inliers
+    
 def triangulate_point(P1: np.ndarray, P2: np.ndarray, x1, x2) -> np.ndarray:
-    raise NotImplementedError("Реализовать триангуляцию точки")
+    A = np.array([
+        x1[0] * P1[2] - P1[0],
+        x1[1] * P1[2] - P1[1],
+        x2[0] * P2[2] - P2[0],
+        x2[1] * P2[2] - P2[1],
+    ])
+    _, _, Vt = np.linalg.svd(A)
+    X = Vt[-1]
+    return X[:3] / X[3]
 
 def decompose_essential(E: np.ndarray, pts1_norm: np.ndarray,
                          pts2_norm: np.ndarray):
+    U, _, Vt = np.linalg.svd(E)
+
+    if np.linalg.det(U) < 0:
+        U = -U
+    if np.linalg.det(Vt) < 0:
+        Vt = -Vt
+
+    R_a = U @ W @ Vt
+    R_b = U @ W.T @ Vt
+    t = U[:, 2]
+
+    candidates = [(R_a, t), (R_a, -t), (R_b, t), (R_b, -t)]
+
+    P1 = np.hstack([np.eye(3), np.zeros((3, 1))])
+
+    n_test = min(len(pts1_norm), 50)
+    if n_test == 0:
+        R0, t0 = candidates[0]
+        return R0, t0 / (np.linalg.norm(t0) + 1e-12)
+    idx = np.linspace(0, len(pts1_norm) - 1, n_test).astype(int)
+
+    best_count = -1
+    best_R, best_t = candidates[0]
+
+    for R, t_cand in candidates:
+        if np.linalg.det(R) < 0:
+            R = -R
+        P2 = np.hstack([R, t_cand.reshape(3, 1)])
+
+        count = 0
+        for i in idx:
+            X = triangulate_point(P1, P2, pts1_norm[i], pts2_norm[i])
+            z1 = X[2]                       # глубина в первой камере
+            z2 = (R @ X + t_cand)[2]
+            if z1 > 0 and z2 > 0:
+                count += 1
+
+        if count > best_count:
+            best_count = count
+            best_R, best_t = R, t_cand
+
+        best_t = best_t / (np.linalg.norm(best_t) + 1e-12)
+        return best_R, best_t
+    
+
+    W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]], dtype=np.float64)
     raise NotImplementedError("Реализовать разложение E и cheirality-тест")
