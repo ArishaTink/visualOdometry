@@ -537,7 +537,7 @@ def umeyama_alignment(src, dst, with_scale=True):
 
 if __name__ == "__main__":
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # папка, где лежит main.py
-    VIDEO = "video_1"                                        # переключить на "video_2" для второго видео
+    VIDEO = "video_2"                                        # переключить на "video_2" для второго видео
 
     DATA_DIR = os.path.join(BASE_DIR, "data", VIDEO)
     CALIB_DIR = DATA_DIR
