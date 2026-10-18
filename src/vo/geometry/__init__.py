@@ -2,6 +2,7 @@ from .epipolar import normalize_points, eight_point_algorithm, sampson_distance
 from .ransac import estimate_essential_ransac
 from .triangulation import triangulate_point, triangulate_depths
 from .pose import decompose_essential
+from .refine import refine_pose
 
 __all__ = [
     "normalize_points",
@@ -11,4 +12,5 @@ __all__ = [
     "triangulate_point",
     "triangulate_depths",
     "decompose_essential",
+    "refine_pose",
 ]

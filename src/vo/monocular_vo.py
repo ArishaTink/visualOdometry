@@ -5,6 +5,7 @@ from .geometry import (
     estimate_essential_ransac,
     decompose_essential,
     triangulate_depths,
+    refine_pose,
 )
 
 class MonocularVO:
@@ -99,6 +100,8 @@ class MonocularVO:
             pts1_n = self._to_norm(pts1[inlier_mask])
             pts2_n = self._to_norm(pts2[inlier_mask])
             R, t = decompose_essential(E, pts1_n, pts2_n)
+            f = (self.K[0, 0] + self.K[1, 1]) / 2
+            R, t = refine_pose(R, t, pts1_n, pts2_n, f, px_tol=self.px_tol)   # НОВОЕ
 
             R_cam = R.T
             t_cam = -R.T @ t

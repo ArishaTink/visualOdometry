@@ -31,3 +31,20 @@ def plot_trajectories(gt: np.ndarray,
     if show:
         plt.show()
     plt.close(fig)
+
+def plot_scale_drift(centers, ratio, save_path=None, show=True):
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(9, 4))
+    ax.plot(centers, ratio, "o-")
+    ax.axhline(ratio.mean(), color="gray", ls="--", label=f"среднее = {ratio.mean():.3f}")
+    ax.set_xlabel("Пройдено по GT, м")
+    ax.set_ylabel("|Δest| / |Δgt|")
+    ax.set_title("Масштаб VO вдоль траектории")
+    ax.grid(True)
+    ax.legend()
+    fig.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path, dpi=150)
+        if show:
+            plt.show()
+            plt.close(fig)

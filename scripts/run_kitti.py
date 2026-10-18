@@ -11,16 +11,20 @@ from vo.datasets.kitti import load_gray, load_kitti_calib, gt_camera_poses
 from vo.evaluation.metrics import ate_rmse, umeyama_alignment
 from vo.evaluation.plotting import plot_trajectories
 
+from vo.evaluation.metrics import ate_rmse, umeyama_alignment, scale_drift
+from vo.evaluation.plotting import plot_trajectories, plot_scale_drift
+
 ROOT = Path(__file__).resolve().parents[1]   # visualOdometry/
 
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--video", default="video_2")
+    p.add_argument("--video", default="video_3")
     p.add_argument("--gt-scale", action="store_true",
                    help="брать масштаб шага из GT вместо оценки самим VO")
     p.add_argument("--verbose", action="store_true", help="печатать каждый кадр")
     p.add_argument("--no-show", action="store_true", help="не открывать окно с графиком")
+    p.add_argument("--window", type=float, default=100.0, help="размер окна для проверки дрейфа масштаба, м")
     return p.parse_args()
 
 
@@ -40,7 +44,7 @@ def main():
     if len(frame_paths) != len(gt_xyz):
         print(f"Внимание: кадров {len(frame_paths)}, GT-поз {len(gt_xyz)} -> берём {n}")
 
-    vo = MonocularVO(K, min_flow_px=2.0, min_fwd=0.85)
+    vo = MonocularVO(K, min_flow_px=1.0, min_fwd=0.75)
 
     for i in range(n):
         scale = None                                   # None -> VO сам оценивает масштаб
@@ -73,6 +77,22 @@ def main():
         err = np.linalg.norm(traj - gt, axis=1)
         print(f"{name:32s} ATE={ate_rmse(traj, gt):8.3f} м   "
               f"в конце={err[-1]:8.3f} м ({100 * err[-1] / max(gt_len, 1e-9):.2f}% пути)")
+
+        # проверка дрейфа масштаба (по сырой траектории, выравнивание не нужно)
+    centers, ratio, st = scale_drift(est, gt, window_m=args.window)
+    print("\nДрейф масштаба (окно %.0f м):" % args.window)
+    if "mean" not in st:
+        print("  слишком короткая траектория для оценки")
+    else:
+        print(f"  глобальное отношение длин: {st['global_ratio']:.3f}")
+        print(f"  по окнам: mean={st['mean']:.3f}  min={st['min']:.3f}  max={st['max']:.3f}")
+        print(f"  разброс (CV)            : {100 * st['cv']:.1f}%")
+        print(f"  тренд за весь путь      : {100 * st['rel_trend']:+.1f}%")
+        ok = st["cv"] < 0.10 and abs(st["rel_trend"]) < 0.15
+        print("  вывод:", "дрейфа масштаба нет" if ok else "ЕСТЬ дрейф масштаба")
+        plot_scale_drift(centers, ratio,
+                         save_path=results_dir / "scale_drift.png",
+                         show=not args.no_show)
 
     # сохраняем результаты
     np.savetxt(results_dir / "trajectory_gt.txt", gt)
