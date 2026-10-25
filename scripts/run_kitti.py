@@ -8,9 +8,6 @@ import numpy as np
 
 from vo.monocular_vo import MonocularVO
 from vo.datasets.kitti import load_gray, load_kitti_calib, gt_camera_poses
-from vo.evaluation.metrics import ate_rmse, umeyama_alignment
-from vo.evaluation.plotting import plot_trajectories
-
 from vo.evaluation.metrics import ate_rmse, umeyama_alignment, scale_drift
 from vo.evaluation.plotting import plot_trajectories, plot_scale_drift
 
@@ -44,7 +41,7 @@ def main():
     if len(frame_paths) != len(gt_xyz):
         print(f"Внимание: кадров {len(frame_paths)}, GT-поз {len(gt_xyz)} -> берём {n}")
 
-    vo = MonocularVO(K, min_flow_px=1.0, min_fwd=0.75)
+    vo = MonocularVO(K, min_flow_px=1.0, min_fwd=-1)
 
     for i in range(n):
         scale = None                                   # None -> VO сам оценивает масштаб

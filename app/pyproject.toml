@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vo-app"
+version = "0.1.0"
+description = "Desktop GUI for monocular visual odometry"
+requires-python = ">=3.10"
+dependencies = [
+    "vo",
+    "PySide6",
+    "pyqtgraph",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-qt", "ruff"]
+
+[project.gui-scripts]
+vo-app = "vo_app.app:run"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vo_app = ["resources/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
