@@ -3,6 +3,7 @@ from PIL import Image
 from scipy.spatial.transform import Rotation
 import os
 import glob
+from pathlib import Path
 
 def load_gray(path: str) -> np.ndarray:
     img = Image.open(path).convert("L")
@@ -50,3 +51,42 @@ def gt_camera_poses(oxts_dir, calib_dir=".", cam_id="00") -> np.ndarray:
     iv, vc, cc = read("calib_imu_to_velo.txt"), read("calib_velo_to_cam.txt"), read("calib_cam_to_cam.txt")
     T_cam_imu = to_T(cc[f"R_rect_{cam_id}"], np.zeros(3)) @ to_T(vc["R"], vc["T"]) @ to_T(iv["R"], iv["T"])
     return T_cam_imu @ T_imu @ np.linalg.inv(T_cam_imu)
+
+def find_sequences(root) -> list[Path]:
+    """Папки с последовательностями KITTI внутри root (или сам root)."""
+    root = Path(root)
+    if (root / "image_00").is_dir():
+        return [root]
+    if not root.is_dir():
+        return []
+    return sorted(p for p in root.iterdir() if (p / "image_00").is_dir())
+ 
+class KittiSequence:
+    """Калибровка, кадры и GT одной последовательности."""
+ 
+    def __init__(self, directory):
+        self.directory = Path(directory)
+        self.name = self.directory.name
+        self.K = load_kitti_calib(str(self.directory / "calib_cam_to_cam.txt"), cam_id="00")
+ 
+        frames = sorted(glob.glob(str(self.directory / "image_00" / "data" / "*.png")))
+        gt = gt_camera_poses(str(self.directory / "oxts" / "data"),
+                             str(self.directory), cam_id="00")[:, :3, 3]
+ 
+        self.n_images, self.n_gt = len(frames), len(gt)
+        n = min(self.n_images, self.n_gt)
+        self.frame_paths = frames[:n]
+        self.gt_xyz = gt[:n]
+ 
+    def __len__(self) -> int:
+        return len(self.frame_paths)
+ 
+    def load_frame(self, i: int) -> np.ndarray:
+        return load_gray(self.frame_paths[i])
+ 
+    def gt_step(self, i: int):
+        """Длина шага GT между кадрами i-1 и i (для i == 0 — None)."""
+        if i == 0:
+            return None
+        return float(np.linalg.norm(self.gt_xyz[i] - self.gt_xyz[i - 1]))
+ 

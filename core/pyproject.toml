@@ -1,12 +1,25 @@
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
-
+ 
 [project]
 name = "vo"
 version = "0.1.0"
+description = "Monocular visual odometry (core, no GUI)"
 requires-python = ">=3.10"
-dependencies = ["numpy", "scipy", "pillow", "evo", "matplotlib"]
-
+dependencies = [
+    "numpy",
+    "scipy",
+    "pillow",
+    "evo",
+    "matplotlib",
+]
+ 
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+ 
 [tool.setuptools.packages.find]
 where = ["src"]
+ 
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -14,16 +14,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-qt", "ruff"]
+dev = ["pytest", "ruff"]
 
 [project.gui-scripts]
 vo-app = "vo_app.app:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-vo_app = ["resources/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

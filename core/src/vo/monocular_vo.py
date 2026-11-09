@@ -39,7 +39,7 @@ class MonocularVO:
         self.prev_pts = None
         self.prev_depth = None
 
-        self.last_tracks = None
+        self.last_tracks = None        #для gui: (pts1, pts2, inlier_mask) или None
 
     def _to_norm(self, pts):
         pts_h = np.hstack([pts, np.ones((len(pts), 1))])
@@ -73,47 +73,49 @@ class MonocularVO:
 
     def process_frame(self, img: np.ndarray, scale: float | None = None) -> np.ndarray:
 
-        if self.prev_img is None:
+        if self.prev_img is None:            # у первого кадра нет предыдущего
             self.prev_img = img
-            self.prev_pts = shi_tomasi_corners(img, self.max_corners)
-            self.prev_depth = np.full(len(self.prev_pts), np.nan)
+            self.prev_pts = shi_tomasi_corners(img, self.max_corners)   # ищем ключевые точки
+            self.prev_depth = np.full(len(self.prev_pts), np.nan)       # заполняем глубины nan
             return self.t_pos.copy()
 
-        self.last_tracks = None
+        self.last_tracks = None   # новые кадры, прошлые данные не нужны (для gui)
 
-        tracked_pts, status = track_with_fb_check(self.prev_img, img, self.prev_pts)      
+        tracked_pts, status = track_with_fb_check(self.prev_img, img, self.prev_pts)   #соответственные точки в новом кадре
         pts1 = self.prev_pts[status]
         pts2 = tracked_pts[status]
         depth_prev = self.prev_depth[status]
 
-        if len(pts1) >= 8:
-            flow = np.median(np.linalg.norm(pts2 - pts1, axis=1))
+        if len(pts1) >= 8:          #минимальное кол-во точек для 8-точечного алгоритма
+            flow = np.median(np.linalg.norm(pts2 - pts1, axis=1))      #если медианый параллакс меньше порога, то считаем, что машина стоит
             if flow < self.min_flow_px:
                 self._record(0, 0.0)
-                return self.t_pos.copy()
+                return self.t_pos.copy()                      #возвращаем предыдущую позицию, не обновляя её
 
-        E, inlier_mask = estimate_essential_ransac(pts1, pts2, self.K, px_tol=self.px_tol)
+        E, inlier_mask = estimate_essential_ransac(pts1, pts2, self.K, px_tol=self.px_tol)    #находим матрицу E и маску инлайеров
+        if inlier_mask is not None:                        # для gui
+            self.last_tracks = (pts1, pts2, inlier_mask)
         n_inl = 0 if inlier_mask is None else int(inlier_mask.sum())
-        if E is not None and n_inl < self.min_inliers_pose:
+        if E is not None and n_inl < self.min_inliers_pose:             #если меньше мин кол-ва инлайнеров, то E не надёжна
             E = None
 
         new_depth = np.full(len(pts2), np.nan)
         step = 0.0
 
         if E is not None:
-            pts1_n = self._to_norm(pts1[inlier_mask])
+            pts1_n = self._to_norm(pts1[inlier_mask])      #Пиксельные в нормалтзованные коорд, но только инлайнеры
             pts2_n = self._to_norm(pts2[inlier_mask])
-            R, t = decompose_essential(E, pts1_n, pts2_n)
-            f = (self.K[0, 0] + self.K[1, 1]) / 2
-            R, t = refine_pose(R, t, pts1_n, pts2_n, f, px_tol=self.px_tol)   # НОВОЕ
+            R, t = decompose_essential(E, pts1_n, pts2_n)   #сдвиг t - единичной длины
+            f = (self.K[0, 0] + self.K[1, 1]) / 2           #фокусное расстояние
+            R, t = refine_pose(R, t, pts1_n, pts2_n, f, px_tol=self.px_tol)
 
             R_cam = R.T
             t_cam = -R.T @ t
             # Проверка: машина едет в основном вперёд. Иначе направление ненадёжно,
             # пропускаем кадр и ждём большей базы (prev_img не меняем).
-            if t_cam[2] < self.min_fwd:
-                self._record(n_inl, 0.0)
-                return self.t_pos.copy()
+            # if t_cam[2] < self.min_fwd:
+            #     self._record(n_inl, 0.0)
+            #     return self.t_pos.copy()
 
             z1, z2 = triangulate_depths(R, t, pts1_n, pts2_n)
             step = self._estimate_step(depth_prev[inlier_mask], z1) if scale is None else scale
@@ -133,6 +135,7 @@ class MonocularVO:
         if len(next_pts) < self.min_tracked:
             next_pts, next_depth = self._replenish(img, next_pts, next_depth)
 
+        
         self.prev_img = img
         self.prev_pts = next_pts
         self.prev_depth = next_depth

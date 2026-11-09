@@ -1,12 +1,16 @@
 # данные и результаты
-/data/
-/results/
+/data/*
+!/data/.gitkeep
+/results/*
+!/results/.gitkeep
+/trajectory*.txt
 
 # Python
 __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
+.venv/
 
 # сборка
 build/
